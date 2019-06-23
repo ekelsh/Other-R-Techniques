@@ -12,9 +12,9 @@ library(plyr)
 library(lattice)
 library(mapproj)
 
-#API Key = AIzaSyCxsSIw4kqr9X5rraizOOyxOt7tdiTRr2I
-#Client ID = 777598348526-jlr5ca0ph6btkdiku4lpdblcluv8tl93.apps.googleusercontent.com
-#Secret Key = vNUTCnvYVxPEqJ9bHay6Byz5
+#API Key = xxx
+#Client ID = xxx
+#Secret Key = xxx
 
 register_google(key = "AIzaSyCxsSIw4kqr9X5rraizOOyxOt7tdiTRr2I")
 
