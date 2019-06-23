@@ -1,0 +1,126 @@
+#Geomapping
+
+library(devtools)
+library(tidyverse)
+library(ggmap)
+library(lubridate)
+library(ggplot2)
+library(data.table)
+library(ggrepel)
+library(dplyr)
+library(plyr)
+library(lattice)
+library(mapproj)
+
+#API Key = AIzaSyCxsSIw4kqr9X5rraizOOyxOt7tdiTRr2I
+#Client ID = 777598348526-jlr5ca0ph6btkdiku4lpdblcluv8tl93.apps.googleusercontent.com
+#Secret Key = vNUTCnvYVxPEqJ9bHay6Byz5
+
+register_google(key = "AIzaSyCxsSIw4kqr9X5rraizOOyxOt7tdiTRr2I")
+
+rt$location
+
+#Examples
+
+#Basic - Plotting a Single Location
+qmap("Chicago, IL")
+
+chc_map <- get_map("Chicago, IL", zoom = 7)
+ggmap(chc_map)
+
+#Intermediate - Plotting Points on a Map
+chc <- geocode("Wrigely Field") #lon of -87.7 and lat of 41.9
+mke <- geocode("Miller Park")   #lon of -88.0 and lat o 43.0
+stl <- geocode("Busch Stadium") #lon on -90.2 and lat of 38.6
+
+lon <- c(-87.7, -88.0, -90.2)
+lat <- c(41.9, 43.0, 38.6)
+
+chc_map <- get_map(chc, maptype = "terrain")
+ggmap(chc_map)
+mke_map <- get_map(mke, maptype = "readmap")
+ggmap(mke_map)
+stl_map <- get_map(stl, maptype = "terrain-labels")
+ggmap(stl_map)
+      #also maptype can be "terrain-lines" "satellite" "hybrid" "toner" "toner-lite" "toner-background" "watercolor
+
+nlc <- merge(chc, mke, all = T)
+nlc <- merge(nlc, stl, all = T)
+
+ggmap(get_map("USA", zoom = 4)) + 
+  geom_point(mapping = aes(x = lon, y = lat), color = "red", data = nlc)
+
+#or
+
+place.names <- c("Wrigley Field", "Miller Park", "Busch Stadium")
+
+locations <- geocode(place.names)
+locations
+
+places <- tibble(name = place.names, lat = locations$lat, lon = locations$lon)
+
+ggmap(get_map("USA", zoom = 4)) +
+  geom_point(mapping = aes(x = lon, y = lat), color = "red", data = places) +
+  geom_text(mapping = aes(x = lon, y = lat, label = name), color = "red", data = places)
+
+#Building Maps Based on a Data Table of Locatios
+
+map <- ggmap(get_googlemap(center = rt$location[33], zoom = 11))
+      #this creates a map of the location of the 33rd row
+
+###
+
+place.names <- rt$location
+
+locations <- geocode(place.names)
+
+places <- tibble(name = place.names, lat = locations$lat, lon = locations$lon)
+
+ggmap(get_map("USA", zoom = 4)) +
+  geom_point(mapping = aes(x = lon, y = lat), color = "red", data = places) +
+  geom_text(mapping = aes(x = lon, y = lat, label = name), color = "red", data = places)
+
+#Cholorpleth Mapping......
+states <- map_data("state")
+states
+
+ggplot(data = states, mapping = aes(x = long, y = lat)) +
+  geom_polygon()
+ggplot(data = states, mapping = aes(x = long, y = lat, group = group)) +
+  geom_polygon()
+ggplot(data = states, mapping = aes(x = long, y = lat, group = group)) +
+  geom_polygon() +
+  coord_map() +
+  theme(axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        panel.background = element_blank())
+
+states <- map_data("state")
+
+yardgoats <- rt %>%
+  group_by(location) %>%
+  summarize(retweet_count= n())
+yardgoats
+
+place.names <- rt$location
+locations <- geocode(place.names)
+
+yardgoats <- data.frame(yardgoats)
+locations <- data.frame(locations)
+
+mapdata <- merge(states, yardgoats, on = c("lat"))
+
+mapdata <- na.omit(mapdata$subregion)
+data.frame(mapdata)
+
+#https://www.lynda.com/RStudio-tutorials/Creating-choropleth-map/672258/730653-4.html?srchtrk=index%3a7%0alinktypeid%3a2%0aq%3aR%0apage%3a2%0as%3arelevance%0asa%3atrue%0aproducttypeid%3a2
+  
+
+ggplot(rt$hashtags)
+
+
+
+
+
+
