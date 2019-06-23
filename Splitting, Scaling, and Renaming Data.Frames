@@ -1,0 +1,165 @@
+###Splitting Data Sets
+###Stratified Random Sampling [proportional representaiton of a class in the train/test data split]
+###Creating Dummy Variables
+###Transforming Variables
+###Renaming Columns
+
+library(forecast)
+library(rpart)
+library(caret)
+library(h2o)
+library(glmnet)
+library(dplyr)
+library(rsample)
+
+set.seed(999)    #set seed to replicate results
+
+#Removing Rows w/ Missing Data
+TBRays <- na.omit(TBRays) %>%
+  as_tibble
+
+#Changing Column Names!!!
+names(TBRays)[1]<-paste("home_win_pct") 
+names(TBRays)[8]<-paste("weekend") 
+
+##########
+#My perferred method for creating testing/training datasets
+train.index <- sample(1:nrow(TBRays), 0.75*nrow(TBRays))   #indices for 75% training data
+
+train <- TBRays[train.index, ]   #training data (607 observations)
+test <- TBRays[-train.index, ]   #testing data (evaluate) (203 observations)
+
+
+#My perferred method for creating testing/training matrixes
+trainx <- as.matrix(train[, -7])   #all factors except Y
+testx <- as.matrix(test[, -7])     
+
+trainy <- as.double(as.matrix(train[, 7]))  #only Y
+testy <- as.double(as.matrix(test[, 7]))
+
+##########
+#Splitting Data
+#base pkg
+set.seed(123)
+train.index   <- sample(1:nrow(TBRays), round(nrow(TBRays) * 0.75))
+train <- TBRays[train.index, ]
+test  <- TBRays[-train.index, ]
+
+#caret pkg
+set.seed(123)
+train.index  <- createDataPartition(TBRays$attendance, p = 0.75, list = FALSE)
+train <- TBRays[train.index, ]
+test <- TBRays[-train.index, ]
+
+features <- setdiff(names(train), "attendance")   #names of all variables MINUS Y (attendance)
+train.x <- train[, features]
+train.x <- as.matrix(train.x)
+train.y <- train$attendance
+
+#rsample pkg
+set.seed(123)
+split  <- initial_split(TBRays, prop = 0.75)
+train  <- training(split_1)
+test   <- testing(split_1)
+
+#to start h2o pkg
+h2o.no_progress()
+h2o.init()
+
+#Stratified Sampling (when a binary class has very few observations...<10%)
+#will break Y down into quantiles and randomly sample from each quantile
+#ensures balanced representation
+
+table(TBRays$weekend) %>% prop.table()  #initial prop
+
+set.seed(123)
+split.strat  <- initial_split(TBRays, prop = 0.75, strata = "weekend")
+train.strat  <- training(split.strat)
+test.strat   <- testing(split.strat)
+
+table(train.strat$weekend) %>% prop.table()  #split prop - train
+table(test.strat$weekend) %>% prop.table()   #split group - test
+
+##########
+#Creating DVs/Numerical Representations of Strings/Categories
+#must use on the full dataset and not seperately for train/test
+
+full_rank  <- dummyVars(~ opposing_team==10, data = TBRays, fullRank = TRUE)
+train.dv   <- predict(full_rank, train)
+test.dv    <- predict(full_rank, test)
+        #first...this creates a dummy variable for the opposing team id equal to 10
+        #second...this splits the dummy variable to align w/ the train/test datasets
+        #third...we add this train/test seperated DV vector to our train/test data sets
+        #OR....we can create the DV in our original dataset before we split it
+
+
+#Response Transformation Y
+#Step 1: review variable in Q
+ggplot(train, aes(x = attendance)) + 
+  geom_density(trim = TRUE) + 
+  geom_density(data = test, trim = TRUE, col = "red")
+
+#Step 2a: Normalize Data way 1 - Log Transformation
+      #...this helps mostly right skewed distributions
+train_log_y <- log(train$attendance)
+test_log_y  <- log(test$attendance)
+
+#Step 2b: Normalize Data way 2 - Box Cox Transformation
+      #...a more flexible transformation option
+lambda  <- forecast::BoxCox.lambda(train$attendance)
+      #lambda will minimize data leakage
+train_bc_y <- BoxCox(train$attendance, lambda)
+test_bc_y  <- BoxCox(test$attendance, lambda)
+
+#Dealing With & Interpretting Transformed Variables - Y
+y <- log(10)   #original log transformation
+exp(y)         #re-transforming the log transformed value
+
+y <- BoxCox(10, lambda)   #original Box Cox transformation
+
+inv_box_cox <- function(x, lambda) {
+  if (lambda == 0) exp(x) else (lambda*x + 1)^(1/lambda) 
+}
+                          #inverses a Box Cox fxn
+inv_box_cox(y, lambda)
+                          #retransforming the Box-Cox Transformation
+
+
+#Dealing With & Interpretting Transformed Variables - X
+features <- setdiff(names(TBRays), "attendance")
+      #identify only the predictor variables [minus attendance]
+features1 <- as.character("temp")
+features1 <- "temp"
+
+pre_process <- preProcess(
+  x = TBRays[, features], method = "scale")                 #scales all variables
+
+pre_process <- preProcess(
+  x = TBRays[, features], method = c("scale", "center"))    #scales and centers all variables
+
+pre_process <- preProcess(
+  x = TBRays[, features1], method = "scale")                #scales only the temp variable
+
+      #method = c("center", "scale", "conditionalX", "BoxCox", "pca", "nzv", "zv", "corr")
+            #"center" subtracts the mean of the variable column from the value
+            #"scale" divides the value by the standard deviation
+            #"zv" identifies numeric predictor columns w/ a single value (i.e. having a zero) and excludes them from further calculations
+            #"nzv" also excludes "near zero-variance" predictors
+            #"corr" seeks to filter out highly correlated predictors
+            #"conditionalX" examines the distribution of each predictor conditional on the outcome...if there is only one unique value within any class the predictor is excluded from futher calculations
+
+train.x <- predict(pre_process, train[, features])
+      #creates training dataset with all factors scaled
+test.x  <- predict(pre_process, test[, features])
+      #creates testing dataset with all factors scaled
+
+train.x <- predict(pre_process, train[, features1])
+#creates training dataset with just temp scaled
+test.x  <- predict(pre_process, test[, features1])
+#creates testing dataset with ust temp scaled
+
+##########
+
+
+
+
