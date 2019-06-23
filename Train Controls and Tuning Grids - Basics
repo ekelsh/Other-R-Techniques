@@ -1,0 +1,64 @@
+#Train Controls and Tuning Grids
+library(caret)
+
+#ex1 SVM w/ Radial Kernel
+train.control.random <- trainControl(method = "repeatedcv", number = 10,
+             repeats = 10, verboseIter = TRUE,
+             savePredictions = "final", search = "random")
+              #10 fold repeatedCV repeated 10 times with random gid search
+
+svm.cv.random <- train(factor(weekend) ~., data=train, method = "svmRadial",
+                       tunelength = 30,
+                       trControl=train.control.random)
+              #30 different AND RANDOM tuning parameters will be tested
+
+svm.cv.random
+svm.cv.random$bestTune
+svm.cv.random$finalModel
+
+#ex2 - Stochastic Gradient Bosting
+tune.grid <- expand.grid(interaction.depth = c(1, 5, 9), 
+                         n.trees = (1:30)*50, 
+                         shrinkage = 0.1,
+                         n.minobsinnode = 20)
+      #The column names should be the same as the fitting function’s arguments. 
+
+train.control.grid <- trainControl(method = "repeatedcv", number = 10,
+                                     repeats = 10, verboseIter = TRUE, 
+                                     savePredictions = "final", search = "grid")
+
+
+boost.tree.cv.grid <- train(factor(weekend) ~., data=train, method = "gbm",
+                       trControl=train.control.grid, tuneGrid = tune.grid)
+
+#####
+#trainControl....creates the train control for CV
+##
+#method = "boot", "repeatedcv", "LOOCV", "oob" [only for RF, bagged trees, etc.], "cv"
+#number = the number of folds OR number of resampling iterations
+#repeats = for repeated k-fold CV only...the # of complete sets of folds to compute
+#p = for leave-group out CV....the training %
+#search = either "grid" or "random" describing how the tuning parameter grid is determined
+      #...for random, we select the number of "random" tuning parameters to test with tuneLength = n
+      #...
+      #...
+#verboseIter = TRUE a logical for printing a training log
+#returnData = TRUE a logical for saving the data
+#returnResamp = "final" "all" "none" indicating how much of the resampling summary metrics should be saved
+#savePredictions = an indicator of hw much of the hold-out predictions for each sample should be saved
+      #TRUE = "all"
+      #FALSE = "none"
+      #"final" saves the predictions for the optimal tuning parameters
+#classProbs = TRUE should class probabilities be computed for classification models in each resample?
+#selectionFunction = the fxn used to select the optimal tuning parameter...this can be a name of the fxn or the fxn itself
+      #...
+      #...
+      #...
+#preProcOptions = a list of options to pass to preProcess..."center" "scale"
+
+#####
+#expand.grid...creates the tuning grid for CV 
+###search = "grid" for trainControl()
+###tuneGrid = xxx or train()
+##
+
