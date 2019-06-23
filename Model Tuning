@@ -1,0 +1,144 @@
+#Tuning
+library(ridge)
+library(glmnet)
+library(arm)
+library(skimr)
+library(lars)
+library(rpart)
+library(randomForest)
+library(caretEnsemble)
+
+set.seed(999)
+
+#To see the model names available in caret
+modelnames <- paste(names(getModelInfo()), collapse=',  ')
+modelnames
+
+# define models
+ridge.model <- glmnet(trainx, trainy, alpha = 0)              
+lasso.model <- glmnet(trainx, trainy, alpha = 1)
+enet.model <- glmnet(trainx, trainy, alpha = .5)
+lars.model <- lars(trainx, trainy)
+bayes.model <- bayesglm(attendance ~., data = train)
+rf.model <- randomForest(attendance ~., data = train)
+rpart.model <- rpart(attendance ~., data =train)
+
+# Train the Model in CARET (random grid search)
+      #allows us to CV the model
+      #allows us to tune the hyperparameteres
+      #allows us to find optimal model by measuring error term
+      #allows us to preprocess the predictors
+
+      #start out using random grid search and tuneLength
+      #tuneLength = number of unique values for the tuning parameter that caret will consider while forming the hyper parameter combos
+
+      #method = boot, cv, repeated cv, LOOCV, LGOCV, oob, boot_all, optimism_boot, boot 632
+      #metric = RMSE/Rsquared for Regression or Accuracy/ROC for Classification
+
+train.control <- trainControl( method = "repeatedcv", number = 5, repeats = 5,
+              search = "random", verboseIter = TRUE, #classProbs = T, summaryFunction = twoClassSummary
+              savePredictions = "final")
+
+ridge.cv <- train(trainx, trainy, method = "ridge", preProcess = "center",
+             metric = "Rsquared", trControl = train.control,
+             tuneLength = 100)  
+      #lambda = 0.0001
+      #Rsquared = 0.821, RMSE = 2,490
+
+lasso.cv <- train(attendance~., train, method = "lasso", preProcess = "center",
+                  metric = "RSquared", trControl = train.control,
+                  tuneLength = 100)
+      #fraction = 0.994
+      #Rsquared = 0.821, RMSE = 2,498
+
+enet.cv <- train(trainx, trainy, method = "enet", preProcess = "center",
+                  metric = "RSquared", trControl = train.control, tunegrid = NULL,
+                  tuneLength = 100)
+      #fraction = 0.988, lambda = 0.00001 (basically 0)
+      #Rsquared = 0.822, RMSE = 2,498
+
+lars.cv <- train(attendance ~., train, method = "lars", preProcess = "center",
+                  metric = "RMSE", trControl = train.control,
+                  tuneLength = 100)
+      #fraction = 0.983
+      #Rsquared = 0.822, RMSE = 2,491
+
+bayes.cv <- train(trainx, trainy, method = "bayesglm", preProcess = "center",
+                 metric = "RMSE", trControl = train.control,
+                 tuneLength = 100)
+      #Rsquared = 0.822, RMSE = 2,498
+
+rf.cv <- train(attendance ~., train, method = "rf", preProcess = "center",
+                  metric = "RMSE", trControl = train.control,
+                  tuneLength = 100)
+
+rpart.cv <- train(attendance ~., train, method = "rpart", preProcess = "center",
+               metric = "RMSE", trControl = train.control,
+               tuneLength = 100)
+
+#Visualizing Models
+plot(ridge.cv, main = "Ridge Model RMSE")    #weight decay
+plot(lasso.cv, main = "LASSO Model RMSE")    #fraction of full solution
+plot(enet.cv, main = "ENET Model RMSE")      #weight decay + fraction
+plot(lars.cv, main = "LARS Model RMSE")      #fraction
+plot(bayes.cv, main = "Bayes Model RMSE")    #DOES NOT WORK - no tuning parameters
+plot(rf.cv, main = "RF Model RMSE")          #randomly selected predictors
+plot(rpart.cv, main = "Rpart Model RMSE")    #Complexity Parameter
+
+varimp.ridge <- varImp(ridge.cv)
+plot(varimp.ridge, main="Variable Importance with Ridge")
+                        
+varimp.enet <- varImp(enet.cv)
+plot(varimp.enet, main="Variable Importance with ENet")
+
+varimp.bayes <- varImp(bayes.cv)
+plot(varimp.bayes, main="Variable Importance with Bayes")
+
+varimp.rpart <- varImp(rpart.cv)
+plot(varimp.rpart, main="Variable Importance with RPart")
+
+svm.model
+xgboost.model
+adaboost.model
+
+#Hyperparameter Tuning!!! w/ tuneGrid
+#tuneGrid = explicityly controls the values considered for each parameter
+
+modelLookup("lasso")              #to look up the hyperparameters for each model
+
+train.control <- trainControl( method = "repeatedcv", number = 5, repeats = 5,
+                               search = "grid", verboseIter = TRUE,
+                               savePredictions = "final")
+                               #classProbs = T ... should class probabilities be returned (classification only)
+                               #summaryFunction=twoClassSummary ... results summary function
+
+#GRIDS!!!!!
+ridge.grid <- expand.grid(
+  lambda = 1:100)                 #will try lambdas 1 -100
+
+lasso.grid <- expand.grid(
+  fraction = seq(.01, .99, .05))  #will try fractions starting at 0.01, ending at 0.99, and will increase by increments of 0.05
+
+
+#MODELS!!!!
+ridge.model <- train(attendance ~., data=train, 
+                    method='ridge', metric='RMSE', tuneGrid = ridge.grid, 
+                    trControl = train.control)
+ridge.model$bestTune
+
+lasso.model <- train(attendance ~., data=train, 
+                     method='lasso', metric='Rsquare', tuneGrid = lasso.grid, 
+                     trControl = train.control, tuneLength = 100)
+lasso.model$bestTune
+
+
+#Update Models
+ridge.model <- glmnet(trainx, trainy, alpha = 0, lambda = 1)
+
+#Make Predictions on Test Data
+predict.ridge <- predict(ridge.model, testx)
+
+#Evaluate Accuracy
+R2(predict.ridge, testy)    #.807
+
+
