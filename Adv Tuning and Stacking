@@ -1,0 +1,318 @@
+#Tuning and Stacking
+
+#STEP 1: MAKE A PLAN
+
+#STEP 2: load the packages and data set
+library(caretEnsemble)
+library(caret)
+library(mice)
+library(tibble)
+library(party)
+library(skimr)
+library(RANN)  # required for knnInpute
+library(randomForest)
+library(gbm)
+library(fastAdaboost)
+library(xgboost)
+library(earth)
+library(C50)
+
+str(TBRays)
+
+head[TBRays[, 1:10]]
+
+#STEP 3: Data Prep and Preprocessing
+
+#Spliting into Train/Test
+# Create the training and test datasets
+set.seed(999)
+
+# Step 3a: Get row numbers for the training data
+trainRowNumbers <- createDataPartition(TBRays$weekend, p=0.8, list=FALSE)
+
+# Step 3b: Create the training  dataset
+train <- TBRays[trainRowNumbers,]
+
+# Step 3c: Create the test dataset
+test <- TBRays[-trainRowNumbers,]
+
+# Store X and Y for later use.
+x = train[, 2:10]
+y = train$weekend
+
+#Descriptive Stats
+skimmed <- skim_to_wide(trainData)
+skimmed[, c(1:5, 6:10)]
+
+#Input Missing Values
+# Create the knn imputation model on the training data
+preProcess_missingdata_model <- preProcess(train, method='knnImpute')
+preProcess_missingdata_model
+
+# Use the imputation model to predict the values of missing data points
+train <- predict(preProcess_missingdata_model, newdata = train)
+anyNA(train)
+
+# One-Hot Encoding
+# Creating dummy variables is converting a categorical variable to as many binary variables as here are categories.
+dummies_model <- dummyVars(weekend ~ ., data=train)
+
+# Create the dummy variables using predict. The Y variable (Purchase) will not be present in trainData_mat.
+trainData_mat <- predict(dummies_model, newdata = train)
+
+# # Convert to dataframe
+train <- data.frame(trainData_mat)
+
+# # See the structure of the new dataset
+str(train)
+
+# Actual pre processing
+    #range = normalize values so it ranges between 0 and 1
+    #center = subtract mean
+    #scale = divide by SD
+    #BoxCox: remove skewness leading to normality, values must be > 0
+    #YeoJohnson = like BoxCox but works with negative values
+    #expoTrans = exponential transformations, works for negative values
+    #pca = replace w/ principal components
+    #ica = replace w/ independent components
+    #spatialSign = project the data to a unit circle
+
+preProcess_range_model <- preProcess(train, method='range')
+trainData <- predict(preProcess_range_model, newdata = train)
+
+# Append the Y variable
+trainData$Purchase <- y
+
+apply(trainData[, 1:10], 2, FUN=function(x){c('min'=min(x), 'max'=max(x))})
+
+
+#STEP 4: Visualizing the Importance of Variables
+featurePlot(x = train[, 1:10], 
+            y = train$weekend, 
+            plot = "box",
+            strip=strip.custom(par.strip.text=list(cex=.7)),
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")))
+
+featurePlot(x = trainData[, 1:10], 
+            y = train$weekend, 
+            plot = "density",
+            strip=strip.custom(par.strip.text=list(cex=.7)),
+            scales = list(x = list(relation="free"), 
+                          y = list(relation="free")))
+
+
+
+#STEP 5: Feature Selection using Recursive Feature Elimination (RFE)
+#...most ML algorithms are able to determine what features are important to predict Y, but in some scenarios, I may need to be careful to include only variable that may be significantly important/make strong business sense
+
+#step 1...build a MLB model on training data and estimate the feature importance
+#step 2...iterate through by building models of given subset sizes (subgroups of the ost important predictors from step 1), recalculating the ranking the predictors at each iteration
+#step 3...compare model performance across different subsets to arrive at optimal # and list of final predictors
+
+set.seed(999)
+options(warn=-1)
+
+subsets <- c(1:5, 8, 9, 10)
+
+ctrl <- rfeControl(functions = rfFuncs,
+                   method = "repeatedcv",
+                   repeats = 10,
+                   verbose = FALSE)
+
+lmProfile <- rfe(x=trainData[, 1:18], y=train$weekend,
+                 sizes = subsets,   #the sizes (the # of most imp features) the rfe should consider (in the model, it iterates models of size 1-5, 8, 9, and 10)
+                 rfeControl = ctrl) #receives the output of the rfeControl() as values
+
+lmProfile
+
+#STEP 6: Training and Tuning the Model 
+#see available algorithms in caret
+modelnames <- paste(names(getModelInfo()), collapse=',  ')
+modelnames
+
+modelLookup('earth')
+
+#set the seed for reproducibility
+set.seed(999)
+
+#train the model using randomForest and predict on the training data itself.
+model_mars = train(weekend ~ ., data=train, method='earth')
+fitted <- predict(model_mars)
+
+model_mars
+
+plot(model_mars, main="Model Accuracies with MARS")
+
+#....caret allows us nt only to build models BUT ALSO:
+      #CV the Model
+      #Tune the Hyper Parameters for Optimal Model Performance
+      #Choose the Optimal Model Based on a Given Evaluation Metric
+      #Preprocess the Predictors
+
+#comparing variable importance
+varimp_mars <- varImp(model_mars)
+plot(varimp_mars, main="Variable Importance with MARS")
+
+#prepare data for training
+#step 1: impute missing values
+test2 <- predict(preProcess_missingdata_model, test)  
+
+#step 2: create one hot encoding
+test3 <- predict(dummies_model, test2)
+
+#step 3: transform the features to range between 0 and 1
+test4 <- predict(preProcess_range_model, test3)
+
+#step 4: view the data
+head(test4[, 1:10])
+
+#compute the CM
+confusionMatrix(reference = test$weekend, 
+                data = predicted, mode='everything', positive='MM')
+
+
+#STEP 7:Setting Up the trainControl()
+
+#...method 
+      #boot = bootstrap sampling
+      #boot632 = bootstrap sampling w/ 63.2% bias correction
+      #boot_all = all boot methods
+      #cv = k-fold cv
+      #repeatedcv = repeated k-fold cv
+      #oob = out of bag cv
+      #LOOCV = leave one out cv
+      #LGOCV = laeve group out cv
+
+#...summaryFunction = twoClassSummary if Y is binary
+#...summaryFunction = multiClassSummary if Y is multiclass
+#...classProbs = T if we want the probability scores vs directly predicting the class
+
+fitControl <- trainControl(
+  method = 'repeatedcv',           # repeated k-fold cross validation
+  number = 5,                      # number of folds
+  repeats = 5,                     # number of repeats
+  savePredictions = 'final',       # saves predictions for optimal tuning parameter
+  classProbs = T,                  # should class probabilities be returned
+  summaryFunction=twoClassSummary  # results summary function
+) 
+
+#Option A....Hyper Parameter Tuning Using tuneLength
+
+#step 1: tune hyper parameters by setting tuneLength
+set.seed(999)
+model_mars2 = train(weekend ~ ., data=train, method='earth', tuneLength = 5, metric='ROC', trControl = fitControl)
+model_mars2
+
+#step 2: predict on testData and Compute the Confusion Matrix
+predicted2 <- predict(model_mars2, test)
+confusionMatrix(reference = test$weekend, data = predicted2, mode='everything', positive='MM')
+
+
+#Option B...Hyper Parameter Tuning Using tuneGrid
+#step 1: Define the tuneGrid
+marsGrid <-  expand.grid(nprune = c(2, 4, 6, 8, 10), 
+                         degree = c(1, 2, 3))
+
+#step 2: Tune hyper parameters by setting tuneGrid
+set.seed(999)
+model_mars3 = train(weekend ~ ., data=train, method='earth', metric='ROC', tuneGrid = marsGrid, trControl = fitControl)
+model_mars3
+
+#step 3: Predict on test data and Compute the confusion matrix
+predicted3 <- predict(model_mars3, test)
+confusionMatrix(reference = test$weekend, data = predicted3, mode='everything', positive='MM')
+
+
+#STEP 8: Training Models!!!
+#Train in Adaboost!!!
+set.seed(999)
+
+model_adaboost = train(weekend ~ ., data=train, method='adaboost', 
+                       tuneLength=10, trControl = fitControl)
+model_adaboost
+
+#Train in RF!!!
+set.seed(999)
+
+model_rf = train(weekend ~ ., data=train, method='rf', 
+                 tuneLength=10, trControl = fitControl)
+
+model_rf
+
+#Train in XGBOOST!!!
+set.seed(999)
+
+model_xgbDART = train(weekend ~ ., data=train, method='xgbDART', 
+                      tuneLength=10, trControl = fitControl, verbose=F)
+
+model_xgbDART
+
+
+#Train in SVM!!!
+set.seed(999)
+
+model_svmRadial = train(weekend ~ ., data=train, method='svmRadial', 
+                        tuneLength=20, trControl = fitControl)
+
+model_svmRadial
+
+#STEP 9
+#Run Resamples() to Compare Models
+# Compare model performances using resample()
+models_compare <- resamples(list(ADABOOST=model_adaboost, RF=model_rf, XGBDART=model_xgbDART, MARS=model_mars3, SVM=model_svmRadial))
+
+# Summary of the models performances
+summary(models_compare)
+
+#Draw Box Plots to Compare Models
+scales <- list(x=list(relation="free"), y=list(relation="free"))
+bwplot(models_compare, scales=scales)
+
+
+#Step 10
+#Stacking Algorithms (running multiple algorithms in one call)
+trainControl <- trainControl(method="repeatedcv", 
+                             number=10, 
+                             repeats=5,
+                             savePredictions=TRUE, 
+                             classProbs=TRUE)
+
+algorithmList <- c('rf', 'adaboost', 'earth', 'xgbDART', 'svmRadial')
+
+set.seed(999)
+
+models <- caretList(weekend ~ ., data=train, trControl=trainControl, 
+                    methodList=algorithmList) 
+
+results <- resamples(models)
+
+summary(results)
+
+#Box plots to compare models
+scales <- list(x=list(relation="free"), y=list(relation="free"))
+bwplot(results, scales=scales)
+
+
+#!!!
+#How to Combine the Predicitions of Multiple Models to Form a Final Prediction!!!
+#create the trainControl
+set.seed(999)
+
+stackControl <- trainControl(method="repeatedcv", 
+                             number=10, 
+                             repeats=5,
+                             savePredictions=TRUE, 
+                             classProbs=TRUE)
+
+#ensemble the predictions of `models` to form a new combined prediction based on glm
+stack.glm <- caretStack(models, method="glm", metric="Accuracy", trControl=stackControl)
+
+print(stack.glm)
+
+# Predict on testData
+stack_predicteds <- predict(stack.glm, newdata=test)
+
+head(stack_predicteds)
+
+
