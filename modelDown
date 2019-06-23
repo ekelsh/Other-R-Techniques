@@ -1,5 +1,77 @@
 #modelDown!!!!
 
+#MY EXAMPLE
+
+# Prepare the data
+head(Game_by_Game_Data)
+
+GameDataX <- Game_by_Game_Data[, -c(1,2,4)]
+GameDataX <- na.omit(GameDataX)
+
+GameDataY <- GameDataX[, 40]
+GameDataX <- GameDataX[, -40]
+
+GameDataX <- as.matrix(GameDataX)
+GameDataY <- as.matrix(GameDataY)
+
+# Random Forest model
+library("randomForest")
+
+rf.model <- randomForest(GameDataY ~ .,  data = GameDataX, na.action = na.omit)
+
+explain.rf <- explain(rf.model, data = GameDataX,
+                              y = GameDataY, 
+                              label = "Random Forest v7")
+
+# SVM model
+library("e1071")
+
+svm.model <- svm(GameDataY ~ ., data = GameDataY, 
+                         type = "eps-regression", na.action = na.omit)
+
+explain.svm <- explain(svm.model, data = GameDataX, 
+                               y = GameDataY, 
+                               label = "Support Vector Machines")
+
+# GBM model (this doesn't work for some reason)
+library("gbm")
+
+GameDatagbm <- as.data.frame(Game_by_Game_Data[, -c(1,2,4)])
+GameDatagbm <- na.omit(GameDatagbm)
+
+gbm1 <- gbm(GameDatagbm$RE24hit ~ ., data = GameDatagbm,
+            distribution = "gaussian", n.trees = 100, shrinkage = 0.1,             
+            interaction.depth = 3, bag.fraction = 0.5, train.fraction = 0.5,  
+            n.minobsinnode = 10, cv.folds = 5, keep.data = TRUE, 
+            verbose = FALSE)  
+
+explain.gbm1 <- explain(gbm1, data = GameDataX, 
+                               y = GameDataY, 
+                               predict_function = function(m,x) predict(m, x, n.trees = 100, type = "regression"),
+                               label = "Generalized Boosted Models")
+
+# OLS
+
+ols.model <- lm(GameDatagbm$RE24hit ~ ., data = GameDatagbm, na.action = na.omit)
+
+explain.ols <- explain(ols.model, data = GameDataX, 
+                               y = GameDataY, 
+                               predict_function = function(m,x) predict(m, x)[,2],
+                               label = "OLS")
+
+
+# Website generation
+library(modelDown)
+
+lol <- modelDown(explain.rf, explain.gbm1, 
+          explain.svm, explain.ols,
+          device = "svg",
+          remote_repository_path = "???",
+          output_folder = "???")
+
+
+#ORIGINAL EXAMPLE
+
 # Prepare the data
 library("DALEX")
 titanic <- na.omit(titanic)
