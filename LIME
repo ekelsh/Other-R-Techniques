@@ -1,0 +1,182 @@
+#LIME
+#supports supervised models produced in caret, mlr, xgboost, h20, keras, and MASS::lda
+#BUT we can build functions that allow it support a variety of additional models (towards the end of the script)
+
+library(lime)
+library(vip)
+library(pdp)
+library(ggplot2)
+library(caret)
+library(h2o)
+library(rsample)
+library(ranger)
+library(caret)
+
+h2o.init()
+
+set.seed(999)
+
+#Create Training/Testing Datasets, Matrices and Set Seed
+train.index <- sample(1:nrow(TBRays), 0.75*nrow(TBRays))  #indices for 75% training data
+
+train <- TBRays[train.index, ]  #training data (607 observations)
+test <- TBRays[-train.index, ]  #testing data (evaluate) (203 observations)
+
+
+trainx <- as.matrix(train[, -7])   #all factors except Y
+testx <- as.matrix(test[, -7])     
+
+trainy <- as.double(as.matrix(train[, 7]))  #only Y
+testy <- as.double(as.matrix(test[, 7]))
+
+# create h2o objects for modeling
+y <- "attendance"
+x <- setdiff(names(train), y)
+train_obs.h2o <- as.h2o(train)
+local_obs.h2o <- as.h2o(test)
+
+# Create Random Forest model with ranger via caret
+fit.caret <- train(
+  attendance ~ ., 
+  data = train, 
+  method = 'ranger',
+  trControl = trainControl(method = "cv", number = 5),
+  tuneLength = 10,
+  importance = 'impurity'
+)
+
+# create h2o models
+h2o_rf <- h2o.randomForest(x, y, training_frame = train_obs.h2o)
+h2o_glm <- h2o.glm(x, y, training_frame = train_obs.h2o, family = "gaussian")    #family = "binomial" for classification
+h2o_gbm <- h2o.gbm(x, y, training_frame = train_obs.h2o)
+
+# ranger model --> model type not built in to LIME
+fit.ranger <- ranger::ranger(
+  attendance ~ ., 
+  data = train, 
+  importance = 'impurity',
+  probability = TRUE
+)
+
+#Variable Importance - Global Interpretation (what are the most important variables)
+vip(fit.ranger) + ggtitle("ranger: RF")
+
+#How Does the Response Variable Change Based On These Variables
+#PDP and ICE Plots (if this doesn't work, restart R!!!)
+
+h2o.partialPlot(h2o_rf, data = train_obs.h2o, cols = "home_win_pct")
+h2o.partialPlot(h2o_rf, data = train_obs.h2o, cols = "away_win_pct")
+
+#ICE Curves (also shows trend lines)
+fit.ranger %>%
+  partial(pred.var = "home_win_pct", grid.resolution = 25, ice = TRUE) %>%
+  autoplot(rug = TRUE, train = train, alpha = 0.1, center = TRUE)
+
+
+#LIME
+explainer_caret <- lime(train, fit.caret, n_bins = 5)
+
+class(explainer_caret)
+
+summary(explainer_caret)
+
+explanation_caret <- explain(
+  x = train, 
+  explainer = explainer_caret, 
+  n_permutations = 5000,
+  dist_fun = "gower",
+  kernel_width = .75,
+  n_features = 6, 
+  feature_select = "highest_weights"
+)
+          #"forward_selection" add one feature at a time until n_features is reached
+          #"highest_weights" fits a ridge regression and selects the n_features with the highest absolute weight
+          #lasso_path" fits a lasso model and chooses the n_features whose LARS path onverges to the 0 value the latest
+          #"tree" fits a tree to select n_features (which needs to be a power of 2); it requires the last version of XGBOOST
+
+tibble::glimpse(explanation_caret)
+
+#Visualizing Results
+plot_features(explanation_caret[1:10,])
+  #this will create a visualization containing an individual plot for each observation
+  #displays the R2 of each case on the top
+  #ONLY EXTRACT A FEW ROWS AT A TIME (hence the [1:10,])
+
+plot_explanations(explanation_caret)
+  #this heat map chart is awesome!!!
+
+#Tuning!!!
+#in this example, we change the distance algorithm to "manhattan", we increase the kernel width (a lot), and we change our feature selection approach to the LARS Model
+#have to play around with this a little bit....
+
+explanation_caret <- explain(
+  x = train, 
+  explainer = explainer_caret, 
+  n_permutations = 5000,
+  dist_fun = "manhattan",
+  kernel_width = 3,
+  n_features = 10, 
+  feature_select = "lasso_path"
+)
+
+plot_features(explanation_caret[3:7,])
+
+
+#???
+explainer_h2o_rf  <- lime(train, h2o_rf, n_bins = 5)
+explainer_h2o_glm <- lime(train, h2o_glm, n_bins = 5)
+explainer_h2o_gbm <- lime(train, h2o_gbm, n_bins = 5)
+
+explanation_rf <- explain(train, explainer_h2o_rf, n_features = 5, kernel_width = .1, feature_select = "highest_weights")
+explanation_glm <- explain(train, explainer_h2o_glm, n_features = 5, kernel_width = .1, feature_select = "highest_weights")
+explanation_gbm <- explain(train, explainer_h2o_gbm, n_features = 5, kernel_width = .1, feature_select = "highest_weights")
+
+p1 <- plot_features(explanation_rf[1:5,], ncol = 1) + ggtitle("rf")
+p2 <- plot_features(explanation_glm[1:5,], ncol = 1) + ggtitle("glm")
+p3 <- plot_features(explanation_gbm[1:5,], ncol = 1) + ggtitle("gbm")
+
+gridExtra::grid.arrange(p1, p2, p3, nrow = 1)
+
+#Function to Allow it to Support Multiple Models [i.e. our original Ranger model]
+#4 Steps...
+
+#Step 1...get the model class
+class(fit.ranger)                             
+
+#Step 2...create a custom model_type function
+      #function tells lime() what model type we're dealing with
+      #"classification", "regression", "survival", "clustering", "multilabel", etc.
+model_type.ranger <- function(x, ...) {
+  return("regression")
+}
+
+model_type(fit.ranger)
+
+#Step 3...create a custom predict_model function (the output will be a data frame)
+      #regression will produce a single column data frame with the predicted responses
+      #classification will produce a column containing the probabilities for each categorical class
+
+predict_model.ranger <- function(x, newdata, ...) {
+  # Function performs prediction and returns data frame with Response
+  pred <- predict(x, newdata)
+  return(as.data.frame(pred$predictions))
+}
+
+predict_model(fit.ranger, newdata = train)
+
+#Step 4....RUN LIME
+explainer_ranger <- lime(train, fit.ranger, n_bins = 5)
+explanation_ranger <- explain(train, explainer_ranger, n_features = 5, n_labels = 2, kernel_width = .1)
+plot_features(explanation_ranger[1:5, ], ncol = 2) + ggtitle("ranger")
+
+
+
+
+
+
+
+
+
+
+
+
