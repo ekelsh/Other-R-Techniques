@@ -1,0 +1,114 @@
+#ORTHOGONAL MATCHING PURSUIT 
+#for feature selection
+
+library(Rfast)
+library(ROI)
+library(tidyr)
+library(dplyr)
+library(caret)
+library(ompr)
+
+set.seed(999)
+
+#Create Matrices and Vectors for Xs and Y
+
+MatrixX <- as.matrix(AttData[, -26])   
+MatrixY <- as.double(as.matrix(AttData[, 26]))  
+
+#Y = Att
+
+omp.model <- omp(MatrixY, MatrixX, xstand = TRUE, tol = qchisq(0.95, 1) + log( length(trainy) ), type = "logistic")
+      #either a binary Y, a vector with discrete (count) data, non negative values, or proportions
+      #ystand...If this is TRUE the response variable is centered. The mean is subtracted from every value.
+      #xstand...If this is TRUE the independent variables are standardised.
+      #method...You can choose between the change in the BIC ("BIC") [Bayesian Information Criterion], the adjusted R^2 or the SSE ("SSE")...default is BIC
+      #the tolerance value to terminate the algorithm...default is 2
+      #type...denotes the parametric model to be used ["logistic", "poisson", "normlog", "gamma", "multinomial", "weibull", or "mv" for multivariate response variable]
+      #type depeds on the y
+
+omp.model
+    #gives optimal number of variables to select
+    #gives BIC values...lower is better
+
+################
+
+#Y = Attendance
+
+ompr.model <- ompr(MatrixY, MatrixX, ystand = TRUE, xstand = TRUE, method = "BIC", tol = 2)
+      #ystand...If this is TRUE the response variable is centered. The mean is subtracted from every value.
+      #xstand...If this is TRUE the independent variables are standardised.
+      #method...You can choose between the change in the BIC ("BIC") [Bayesian Information Criterion], the adjusted R^2 or the SSE ("SSE")...default is BIC
+      #the tolerance value to terminate the algorithm...default is 2 for BIC
+      #type...denotes the parametric model to be used ["logistic", "poisson", "quasipoisson", "quasibinomial", "normlog", "gamma", "multinomial", "weibull", or "mv" for multivariate response variable]
+      #type depeds on the y
+
+ompr.model
+      #returns # of variables and the BIC for each [want BIC to be low]
+      #in this case...5 variables w/ BIC of 824 is the best model
+
+summary(ompr.model)
+
+plot(ompr.model)
+      #visualization of # of Variables vs the BIC level (confirms 5 Vars is the optimal model)
+
+###########
+
+###Can do the Following for Either Y=Weekend or Y=Attendance
+#the example uses Y = Attendance
+
+#Forward Backward w Earcly Dropping variable selection method using correlation
+###variation of classical forward selection, where at each step, only the statistically sig variables carry on...the rest are dropped
+
+cor.fbed.test <- cor.fbed(AttY, AttX, alpha=0.05, K=3)   
+      #alpha default is 0.05 [equiv to level of sig]
+      #k means the number of times to repeat the process
+
+cor.fbed.test
+      #optimal number of variables [want the number that = lowest p-value]
+      #log p-values [want low]
+      #...so a 5 variable model is our optimal model
+
+cor.fbed.test$info
+
+###
+#Correlation Based Forward Regression
+cor.fsreg <- cor.fsreg(AttY, AttX, threshold = 0.05)
+      #threshold default is 0.05 [alpha/sig]
+
+cor.fsreg
+      ## of variables selected
+      # log of p-value [we want this to be low]
+      # test stat [we want this to be low]
+      # BIC [we want this to be low]
+      #....so a 5 variable model is the optimal model
+
+###
+#Variable Selection in Generalised Linear Reg Models w/ Forward Selection
+fs.reg <- fs.reg(y=AttY, ds=AttX, sig=0.05, type="poisson")
+      #sig = sig level for assessing p-values (default is 0.05)
+      #type = "logistic" for %, values betwee 0-1, binary variable, etc.
+      #type = "poisson" for count data
+
+fs.reg
+      #gives # of variables used in each step trial
+      #gives log of p-value, test-stat, and BIC [we want low for all]
+
+###
+#Correlation Betwen a Vector and a Set of Variables
+reg.corr <- correls(AttY, AttX, type = "pearson", a=0.05, rho=0)
+      #a = alpha [sig level used for CI]
+      #rho = hypothesised correlation to be used in the hyp testing
+      #type = "pearsn" or "spearman"
+      
+reg.corr  
+      #gives corr, CI of corr, z-stat, and p-value
+      #looks at correlation between y (attendance) and the entirety of the x variables in the matrix
+
+group.corr <- groupcorrels(MatrixY, MatrixX, type = "pearson", ina=train$opposing_team)
+      #type = "pearsn" or "spearman" or "kendall"
+      #ina = a factor variable or a numeric variable indicating the group of each observation
+      
+group.corr
+      #this example splits correlations up by team
+      #the # @ the top of the columns (1-7) indicate the placement of the variables in the matrix used
+
