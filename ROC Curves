@@ -1,0 +1,93 @@
+#ROC Curves, Lift Charts, K-Stats, and Sens/Spec/Likelihood
+
+library(ROCR)
+library(plotROC)
+library(AUC)
+
+#make model #1...fit logistic regression model [or whatever model]
+log.model <- glm(weekend~., data=train,family=binomial(link=logit))
+predict.log <- predict(log.model, test)
+
+#make model #2...fit whatever other classification model
+svm.model <- svm(weekend~., data=train,family=binomial(link=logit))
+predict.svm <- predict(svm.model, test)
+
+
+#METHOD 1
+
+#ROC Curve
+prediction(predict.log, testy) %>%
+  performance(measure = "tpr", x.measure = "fpr") %>%
+  plot()
+prediction(predict.svm, testy) %>%
+  performance(measure = "tpr", x.measure = "fpr") %>%
+  plot()
+      #this only works with probabilities...not outright 0s and 1s
+
+#AUC
+prediction(predict.log, testy) %>%
+  performance(measure = "auc") %>%
+  .@y.values
+      #0.969
+prediction(predict.svm, testy) %>%
+  performance(measure = "auc") %>%
+  .@y.values
+      #0.936
+
+#METHOD 2 
+
+#ROC Chart + Lifting [only works w/ probabilities]
+pred.log <- prediction(predict.log, testy)
+pred.svm <- prediction(predict.svm, testy)
+
+perf.log <- performance(pred.log, "tpr", "fpr")
+perf.svm <- performance(pred.svm, "tpr", "fpr")
+      #calculates True Positive and False Positive Rates
+plot(perf.log, main="ROC Curve", colorize=T)
+plot(perf.scm, main="ROC Curve", colorize=T)
+
+perf.lift.log <- performance(pred.log, "lift", "rpp")
+perf.lift.svm <- performance(pred.svm, "lift", "rpp")
+
+plot(perf.lift.log, main="lift curve", colorize=T)
+plot(perf.lift.svm, main="lift curve", colorize=T)
+
+
+#Calculating KS Stats
+###NOTE: do NOT use lifted performance creation when calculating this
+ks1.tree <- max(attr(perf, "y.values")[[1]]-
+                  (attr(perf, "x.values")[[1]]))
+ks1.tree     #0.782
+
+
+
+#sensitivity: True Pos / (True Pos + False Neg)
+#specificity: True Neg / (True Neg + False Pos)
+#likelihood ratio: (1-sensitivity) / specificity
+
+true.pos.log <- ifelse(predict.log$outcome == 1 & test$weekend == 1, 1, 0)
+true.pos.log <- sum(true.pos.log)   #64
+true.neg.log <- ifelse(predict.log$outcome == 0 & test$weekend == 0, 1, 0)
+true.neg.log <- sum(true.neg.log)   #117
+false.pos.log <- ifelse(predict.log$outcome == 1 & test$weekend == 0, 1, 0)
+false.pos.log <- sum(false.pos.log)  #14
+false.neg.log <- ifelse(predict.log$outcome == 0 & test$weekend == 1, 1, 0)
+false.neg.log <- sum(false.neg.log)   #8
+
+sens.log <- true.pos.log/(true.pos.log+false.neg.log)  #.888
+spec.log <- true.neg.log/(true.neg.log+false.pos.log)  #.893
+ll.log <- (1-sens.log)/spec.log  #0.124
+
+true.pos.rf <- ifelse(predict.rf == 1 & test$weekend == 1, 1, 0)
+true.pos.rf <-sum(true.pos.rf)    #59
+true.neg.rf <- ifelse(predict.rf == 0 & test$weekend == 0, 1, 0)
+true.neg.rf <- sum(true.neg.rf)   #113
+false.pos.rf <- ifelse(predict.rf == 1 & test$weekend == 0, 1, 0)
+false.pos.rf <- sum(false.pos.rf)   #18
+false.neg.rf <- ifelse(predict.rf == 0 & test$weekend == 1, 1, 0)
+false.neg.rf <- sum(false.neg.rf)   #13
+
+sens.rf <- true.pos.rf/(true.pos.rf+false.neg.rf)   #.819
+spec.rf <- true.neg.rf/(true.neg.rf+false.pos.rf)   #.862
+ll.rf <- (1-sens.rf)/spec.rf   #0.209
+
