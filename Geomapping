@@ -16,7 +16,7 @@ library(mapproj)
 #Client ID = xxx
 #Secret Key = xxx
 
-register_google(key = "AIzaSyCxsSIw4kqr9X5rraizOOyxOt7tdiTRr2I")
+register_google(key = "xxx")
 
 rt$location
 
